@@ -1,5 +1,5 @@
 /*
- * Sideload persistence fix for Instagram.
+ * Client-side Reels limiter and sideload compatibility fixes for Instagram.
  *
  * Based on opa334/IGSideloadFix, Copyright (c) 2022 Lars Fröder.
  * Used under the MIT License; see LICENSE.
@@ -12,6 +12,48 @@
 static NSString *UnscrollKeychainAccessGroup;
 static NSURL *UnscrollFakeGroupContainerURL;
 static NSURL *(*UnscrollOriginalAppStoreReceiptURL)(id, SEL);
+static id (*UnscrollOriginalReelsObjects)(id, SEL, id);
+static id (*UnscrollOriginalHomeFeedObjects)(id, SEL, id);
+static char UnscrollFirstReelKey;
+
+static id UnscrollLimitReelsObjects(id self, SEL selector, id adapter)
+{
+    id objects = UnscrollOriginalReelsObjects(self, selector, adapter);
+    if (![objects isKindOfClass:[NSArray class]] || [objects count] == 0) {
+        return objects;
+    }
+
+    id firstReel = objc_getAssociatedObject(self, &UnscrollFirstReelKey);
+    if (firstReel == nil) {
+        firstReel = [objects firstObject];
+        objc_setAssociatedObject(
+            self,
+            &UnscrollFirstReelKey,
+            firstReel,
+            OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return @[firstReel];
+}
+
+static id UnscrollFilterHomeFeedObjects(id self, SEL selector, id adapter)
+{
+    id objects = UnscrollOriginalHomeFeedObjects(self, selector, adapter);
+    Class clipsModelClass = objc_getClass("IGFeedScrollableClipsModel");
+    if (![objects isKindOfClass:[NSArray class]] || clipsModelClass == Nil) {
+        return objects;
+    }
+
+    NSMutableArray *filteredObjects =
+        [NSMutableArray arrayWithCapacity:[objects count]];
+    for (id object in objects) {
+        if (![object isKindOfClass:clipsModelClass]) {
+            [filteredObjects addObject:object];
+        }
+    }
+    return filteredObjects.count == [objects count]
+        ? objects
+        : [filteredObjects copy];
+}
 
 static void UnscrollCreateDirectory(NSURL *url)
 {
@@ -142,5 +184,17 @@ static void UnscrollInitializeRuntimeFix(void)
                 [NSBundle class],
                 @selector(appStoreReceiptURL),
                 (IMP)UnscrollAppStoreReceiptURL);
+
+        UnscrollOriginalReelsObjects =
+            (id (*)(id, SEL, id))UnscrollReplaceMethod(
+                objc_getClass("_TtC23IGSundialFeedDataSource23IGSundialFeedDataSource"),
+                @selector(objectsForListAdapter:),
+                (IMP)UnscrollLimitReelsObjects);
+
+        UnscrollOriginalHomeFeedObjects =
+            (id (*)(id, SEL, id))UnscrollReplaceMethod(
+                objc_getClass("IGMainFeedListAdapterDataSource"),
+                @selector(objectsForListAdapter:),
+                (IMP)UnscrollFilterHomeFeedObjects);
     }
 }

@@ -126,7 +126,7 @@ else
   printf 'Using Theos toolchain: %s\n' "$theos_dir"
 fi
 
-printf 'Building the iOS runtime fix...\n'
+printf 'Building the Unscroll client runtime...\n'
 THEOS="$theos_dir" make \
   -C "$REPOSITORY_ROOT/runtime_fix" \
   clean all FINALPACKAGE=1
@@ -142,7 +142,7 @@ if ((keep_extensions)); then
 fi
 
 mkdir -p "$(dirname -- "$output_path")"
-printf 'Patching and validating the IPA...\n'
+printf 'Injecting and validating the IPA...\n'
 python3 "$REPOSITORY_ROOT/build_unscroll.py" \
   "${builder_args[@]}" \
   "$source_ipa" \

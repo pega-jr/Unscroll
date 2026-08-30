@@ -2,15 +2,15 @@
 
 Use Instagram on iOS without an infinite Reels feed.
 
-Unscroll patches a user-supplied, decrypted Instagram IPA. It blocks the network
-routes used by algorithmic Reels discovery, recommendations, and endless chaining
-while keeping normal Instagram features available.
+Unscroll injects a small client-side limiter into a user-supplied, decrypted
+Instagram IPA. It filters suggested Reels from Home and prevents endless Reel
+chaining without intercepting or changing Instagram's network requests.
 
 ## Compatibility
 
 | Instagram version | Status | Date |
 | --- | --- | --- |
-| `439.0.0` | ✅ Success | July 26, 2026 |
+| `444.0.0` | ✅ Success | August 29, 2026 |
 
 ## What stays and what goes
 
@@ -20,23 +20,22 @@ while keeping normal Instagram features available.
 | Explore and search | ✅ Works normally |
 | Stories, profiles, and direct messages | ✅ Work normally |
 | A Reel opened from a message or profile | ✅ Still opens |
-| Reels discovery and recommendation feeds | ❌ Blocked |
+| Reels tab | ⚠️ Shows one Reel |
 | Endless Reel chaining | ❌ Blocked |
-| Reels injected into other feeds | ❌ Blocked |
+| Suggested Reels carousel in Home | ❌ Hidden |
 
-The Reels button may remain visible because Unscroll changes requests rather than
-Instagram's interface. Opening it should not produce a working algorithmic feed.
+The Reels button remains visible and opens one Reel. Swiping or refreshing does
+not expose more recommendations. A Reel opened from a message or profile gets its
+own viewer and remains available.
 
-Instagram internally uses the older “reels media” name for Story endpoints.
-Unscroll deliberately preserves those routes so viewing and posting Stories keeps
-working.
+Unscroll only hooks two Reels-specific data sources. It does not modify Story
+requests or models, so viewing and posting Stories remain separate.
 
-Every standard build also injects a small sideload compatibility fix. It keeps the
-signed app on its available keychain and app-group containers so a force quit does
-not discard the login session, and it prevents the sideloaded app from being
-mistaken for an expired TestFlight beta.
+The same small runtime library keeps the signed app on its available keychain and
+app-group containers so a force quit does not discard the login session. It also
+prevents the sideloaded app from being mistaken for an expired TestFlight beta.
 
-## Recomended: Build with GitHub Actions
+## Recommended: Build with GitHub Actions
 
 1. Fork Unscroll on GitHub.
 2. Host your decrypted Instagram IPA at an HTTPS direct-download URL.
@@ -53,7 +52,7 @@ You need:
 - A lawfully obtained, decrypted ARM64 Instagram IPA
 - An iPhone running iOS 16.3 or newer
 
-Clone your fork, then run the one-command builder:
+Clone Unscroll, then run the one-command builder:
 
 ```bash
 git clone https://github.com/Mihir-A/Unscroll.git
@@ -80,15 +79,14 @@ extensions or using an existing Theos installation.
 The builder:
 
 1. Installs and reuses a clone-local iOS build toolchain.
-2. Builds and injects the session and TestFlight compatibility fix.
+2. Builds one small library containing the Reels limiter and sideload fixes.
 3. Confirms that the app executable is decrypted ARM64 code.
-4. Patches the known algorithmic Reels routes without changing string lengths.
+4. Injects the library without changing Instagram's network routes.
 5. Removes bundled app extensions by default for easier sideload signing.
 6. Rebuilds the IPA and checks every ZIP entry.
 
-The route set is currently verified against Instagram `439.0.0`. Instagram can
-change its binary and endpoints at any time, so other versions may find different
-route counts or need updates.
+The client hooks target Instagram `444.0.0`. Instagram can rename its internal
+classes at any time, so other versions may need updated hook names.
 
 ## Install
 
@@ -111,10 +109,11 @@ Unscroll cannot decrypt apps. Use a legitimately obtained decrypted IPA.
 In the fork, open **Settings → Actions → General → Workflow permissions**, select
 **Read and write permissions**, save, and run the workflow again.
 
-**No routes were found.**
+**Reels continue chaining.**
 
-The Instagram version likely changed. Open an issue with the exact app version and
-the builder's route-count output; do not attach the IPA.
+Confirm that the source IPA is Instagram `444.0.0` and rebuild it with the latest
+Unscroll version. For another Instagram version, open an issue with its exact
+version; do not attach the IPA.
 
 **The app will not sign or install.**
 
@@ -129,7 +128,7 @@ that injection in its output.
 
 **Instagram asks for a TestFlight beta update.**
 
-Confirm that the build output reports `Injected runtime fix:
+Confirm that the build output reports `Injected client-side Reels limiter:
 UnscrollRuntimeFix.dylib`.
 
 ## Legal and privacy
@@ -141,13 +140,5 @@ the source app in accordance with applicable law and service terms.
 Unscroll is not affiliated with, endorsed by, or sponsored by Instagram or Meta.
 Instagram, Reels, TestFlight, and related names are trademarks of their respective
 owners.
-
-## Credits
-
-Unscroll grew from the iOS route research in
-[HealthyIG](https://github.com/AlessandroBonomo28/HealthyIG). The runtime
-compatibility approach is based on
-[IGSideloadFix](https://github.com/opa334/IGSideloadFix) by Lars Fröder and retains
-its MIT license in [`runtime_fix/LICENSE`](runtime_fix/LICENSE).
 
 The project is distributed under the [Apache License 2.0](LICENSE.md).

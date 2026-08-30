@@ -1,8 +1,11 @@
 Unscroll
 Copyright 2026 Mihir-A
 
-This product includes software and route research derived from HealthyIG:
+This project's early iOS research grew from HealthyIG:
 https://github.com/AlessandroBonomo28/HealthyIG
+
+The client-side feed-limiting design was informed by SCInsta:
+https://github.com/SoCuul/SCInsta
 
 The runtime compatibility component is based on IGSideloadFix:
 Copyright (c) 2022 Lars Fröder

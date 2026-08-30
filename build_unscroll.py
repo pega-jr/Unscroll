@@ -1,33 +1,15 @@
 #!/usr/bin/env python3
-"""Build an iOS Unscroll IPA from a user-supplied decrypted Instagram IPA."""
+"""Build an iOS Unscroll IPA with a minimal client-side Reels limiter."""
 
 from __future__ import annotations
 
 import argparse
-import mmap
 import shutil
 import struct
 import tempfile
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, BadZipFile, ZipFile, ZipInfo
 
-
-UNSCROLL_ROUTES = (
-    b"/clips/ads_discover_sync_flow/",
-    b"/clips/associated_clips/",
-    b"/clips/discover/",
-    b"/clips/drama_discover/",
-    b"/clips/internal_content_lane_feed/",
-    b"/clips/panavideochaining/",
-    b"/clips/playlist_chaining/",
-    b"/clips/trend_only/",
-    b"/clips/trends_media_feed/",
-    b"clips/trending_add_yours_prompts",
-    b"/discover/explore_clips/",
-    b"/discover/interest_grid/clips/",
-    b"/feed/injected_reels_media/",
-    b"/feed/injected_reels_media_www/",
-)
 
 EXECUTABLE = "Payload/Instagram.app/Instagram"
 RUNTIME_FIX_NAME = "UnscrollRuntimeFix.dylib"
@@ -45,13 +27,14 @@ LC_ENCRYPTION_INFO_64 = 0x2C
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Build an iOS Instagram IPA without algorithmic Reels feeds."
+        description="Build an iOS Instagram IPA with a single-item Reels viewer."
     )
     parser.add_argument("input", type=Path, help="decrypted Instagram IPA")
     parser.add_argument("output", type=Path, help="output Unscroll IPA")
     parser.add_argument(
         "--runtime-fix",
         type=Path,
+        required=True,
         help="inject UnscrollRuntimeFix.dylib for sideload compatibility",
     )
     parser.add_argument(
@@ -167,49 +150,13 @@ def validate_runtime_fix(dylib_path: Path) -> None:
         raise ValueError("runtime fix must be an ARM64 Mach-O dylib")
 
 
-def route_offsets(binary: mmap.mmap, route: bytes) -> list[int]:
-    offsets: list[int] = []
-    start = 0
-    while (offset := binary.find(route, start)) != -1:
-        offsets.append(offset)
-        start = offset + len(route)
-    return offsets
-
-
-def patch_binary(binary_path: Path, routes: tuple[bytes, ...]) -> dict[str, int]:
+def validate_binary(binary_path: Path) -> None:
     crypt_id = encryption_id(binary_path)
     if crypt_id != 0:
         raise ValueError(
             f"Instagram executable is encrypted (cryptid={crypt_id}); "
             "use a decrypted IPA"
         )
-
-    counts: dict[str, int] = {}
-    with binary_path.open("r+b") as stream, mmap.mmap(stream.fileno(), 0) as binary:
-        patches: dict[int, int] = {}
-        for route in routes:
-            offsets = route_offsets(binary, route)
-            counts[route.decode()] = len(offsets)
-            patch_delta = 1 if route.startswith(b"/") else 0
-            expected_byte = route[patch_delta]
-            for offset in offsets:
-                patch_offset = offset + patch_delta
-                previous = patches.setdefault(patch_offset, expected_byte)
-                if previous != expected_byte:
-                    raise ValueError(f"conflicting routes at patch offset {patch_offset}")
-
-        if not patches:
-            raise ValueError("none of the Unscroll routes were found")
-        for offset, expected_byte in sorted(patches.items()):
-            if binary[offset] != expected_byte:
-                raise ValueError(f"unexpected byte at patch offset {offset}")
-            binary[offset] = ord("x")
-        binary.flush()
-
-        for route, original_count in counts.items():
-            if original_count and route_offsets(binary, route.encode()):
-                raise ValueError(f"route remains after patching: {route}")
-    return counts
 
 
 def copy_zip_entry(source: ZipFile, target: ZipFile, info) -> None:
@@ -233,13 +180,12 @@ def build_ipa(
     source_path: Path,
     output_path: Path,
     keep_extensions: bool,
-    runtime_fix: Path | None,
+    runtime_fix: Path,
 ) -> None:
     source_path = source_path.resolve()
     output_path = output_path.resolve()
-    if runtime_fix is not None:
-        runtime_fix = runtime_fix.resolve()
-        validate_runtime_fix(runtime_fix)
+    runtime_fix = runtime_fix.resolve()
+    validate_runtime_fix(runtime_fix)
     if source_path == output_path:
         raise ValueError("input and output IPA paths must differ")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -259,17 +205,13 @@ def build_ipa(
                 with source.open(EXECUTABLE) as reader, binary_path.open("wb") as writer:
                     shutil.copyfileobj(reader, writer, length=1024 * 1024)
 
-                counts = patch_binary(binary_path, UNSCROLL_ROUTES)
-                if runtime_fix is not None:
-                    inject_dylib(binary_path, RUNTIME_FIX_INSTALL_NAME)
+                validate_binary(binary_path)
+                inject_dylib(binary_path, RUNTIME_FIX_INSTALL_NAME)
 
                 removed_entries = 0
                 with ZipFile(staged_output, "w", allowZip64=True) as target:
                     for info in source.infolist():
-                        if (
-                            runtime_fix is not None
-                            and info.filename == RUNTIME_FIX_ARCHIVE_PATH
-                        ):
+                        if info.filename == RUNTIME_FIX_ARCHIVE_PATH:
                             continue
                         if not keep_extensions and info.filename.startswith(
                             EXTENSION_PREFIXES
@@ -283,8 +225,7 @@ def build_ipa(
                                 shutil.copyfileobj(reader, writer, length=1024 * 1024)
                         else:
                             copy_zip_entry(source, target, info)
-                    if runtime_fix is not None:
-                        add_runtime_fix(target, runtime_fix)
+                    add_runtime_fix(target, runtime_fix)
         except BadZipFile as error:
             raise ValueError(f"invalid IPA/ZIP archive: {error}") from error
 
@@ -297,21 +238,14 @@ def build_ipa(
                 for name in verification.namelist()
             ):
                 raise ValueError("an app extension remains in the rebuilt IPA")
-            if (
-                runtime_fix is not None
-                and RUNTIME_FIX_ARCHIVE_PATH not in verification.namelist()
-            ):
+            if RUNTIME_FIX_ARCHIVE_PATH not in verification.namelist():
                 raise ValueError("runtime fix is missing from the rebuilt IPA")
 
         staged_output.replace(output_path)
 
-    print("Patched route occurrences:")
-    for route, count in counts.items():
-        print(f"{count:3}  {route}")
     if not keep_extensions:
         print(f"Removed extension entries: {removed_entries}")
-    if runtime_fix is not None:
-        print(f"Injected runtime fix: {RUNTIME_FIX_NAME}")
+    print(f"Injected client-side Reels limiter: {RUNTIME_FIX_NAME}")
     print(f"Created: {output_path}")
 
 
