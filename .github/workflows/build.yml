@@ -11,41 +11,52 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Java
-      uses: actions/setup-java@v4
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
       with:
-        distribution: 'temurin'
-        java-version: '17'
+        node-version: 18
 
-    - name: Set up Flutter
-      uses: subosito/flutter-action@v2
+    - name: Set up Xcode
+      uses: maxim-lobanov/setup-xcode@v1
       with:
-        channel: 'stable'
+        xcode-version: latest-stable
 
-    - name: Locate project and build
+    - name: Install dependencies & Build
       run: |
-        # Chercher le dossier contenant pubspec.yaml
-        PUBSPEC_PATH=$(find . -name "pubspec.yaml" | head -n 1)
-        
-        if [[ -z "$PUBSPEC_PATH" ]]; then
-          echo "Erreur : Aucun fichier pubspec.yaml trouvé dans le dépôt."
+        # Installation des paquets Node.js si package.json existe
+        if [ -f "package.json" ]; then
+          echo "Projet React Native / JS détecté"
+          npm install
+        fi
+
+        # Recherche des fichiers projets Xcode
+        WORKSPACE=$(find . -name "*.xcworkspace" -not -path "*/Pods/*" | head -n 1)
+        XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/Pods/*" | head -n 1)
+
+        if [ -n "$WORKSPACE" ]; then
+          TARGET_DIR=$(dirname "$WORKSPACE")
+          cd "$TARGET_DIR"
+          # Installation des pods si Podfile présent
+          if [ -f "Podfile" ]; then
+            pod install
+          fi
+          SCHEME=$(xcodebuild -list -workspace "$(basename "$WORKSPACE")" | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
+          xcodebuild -workspace "$(basename "$WORKSPACE")" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
+        elif [ -n "$XCODEPROJ" ]; then
+          TARGET_DIR=$(dirname "$XCODEPROJ")
+          cd "$TARGET_DIR"
+          SCHEME=$(xcodebuild -list -project "$(basename "$XCODEPROJ")" | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
+          xcodebuild -project "$(basename "$XCODEPROJ")" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
+        else
+          echo "Erreur : Aucun projet iOS trouvé."
           exit 1
         fi
 
-        PROJECT_DIR=$(dirname "$PUBSPEC_PATH")
-        echo "Dossier du projet trouvé : $PROJECT_DIR"
-        cd "$PROJECT_DIR"
-
-        # Installation des dépendances et compilation
-        flutter pub get
-        flutter build ios --release --no-codesign
-
-        # Préparation du dossier Payload
+        # Génération du .ipa
         mkdir -p Payload
-        cp -r build/ios/iphoneos/Runner.app Payload/
+        APP_PATH=$(find build/Release-iphoneos -name "*.app" | head -n 1)
+        cp -r "$APP_PATH" Payload/
         zip -r Unscroll.ipa Payload
-        
-        # Déplacer l'IPA à la racine du dépôt
         mv Unscroll.ipa $GITHUB_WORKSPACE/
 
     - name: Upload IPA
