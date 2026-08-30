@@ -8,33 +8,46 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Set up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+    - name: Set up Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
 
-      - name: Build App
-        run: |
-          xcodebuild -project Unscroll.xcodeproj \
-                     -scheme Unscroll \
-                     -sdk iphoneos \
-                     -configuration Release \
-                     CODE_SIGN_IDENTITY="" \
-                     CODE_SIGNING_REQUIRED=NO \
-                     CODE_SIGNING_ALLOWED=NO \
-                     clean build
+    - name: Build App
+      run: |
+        PROJECT=$(find . -maxdepth 2 -name "*.xcodeproj" -o -name "*.xcworkspace" | head -n 1)
+        
+        if [[ -z "$PROJECT" ]]; then
+          echo "Erreur : Aucun projet Xcode trouvé."
+          exit 1
+        fi
 
-      - name: Package IPA
-        run: |
-          mkdir -p Payload
-          cp -r build/Release-iphoneos/*.app Payload/
-          zip -r Unscroll.ipa Payload
+        SCHEME=$(xcodebuild -list -workspace "$PROJECT" 2>/dev/null | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
+        if [[ -z "$SCHEME" ]]; then
+          SCHEME=$(xcodebuild -list -project "$PROJECT" 2>/dev/null | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
+        fi
 
-      - name: Upload IPA Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: Unscroll-IPA
-          path: Unscroll.ipa
+        echo "Projet trouvé : $PROJECT"
+        echo "Scheme trouvé : $SCHEME"
+
+        if [[ "$PROJECT" == *.xcworkspace ]]; then
+          xcodebuild -workspace "$PROJECT" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
+        else
+          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
+        fi
+
+    - name: Package IPA
+      run: |
+        mkdir -p Payload
+        APP_PATH=$(find build/Release-iphoneos -name "*.app" | head -n 1)
+        cp -r "$APP_PATH" Payload/
+        zip -r Unscroll.ipa Payload
+
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: Unscroll-IPA
+        path: Unscroll.ipa
