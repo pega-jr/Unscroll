@@ -11,39 +11,27 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up Xcode
-      uses: maxim-lobanov/setup-xcode@v1
+    - name: Set up Java
+      uses: actions/setup-java@v4
       with:
-        xcode-version: latest-stable
+        distribution: 'temurin'
+        java-version: '17'
 
-    - name: Build App
-      run: |
-        PROJECT=$(find . -maxdepth 2 -name "*.xcodeproj" -o -name "*.xcworkspace" | head -n 1)
-        
-        if [[ -z "$PROJECT" ]]; then
-          echo "Erreur : Aucun projet Xcode trouvé."
-          exit 1
-        fi
+    - name: Set up Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
 
-        SCHEME=$(xcodebuild -list -workspace "$PROJECT" 2>/dev/null | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
-        if [[ -z "$SCHEME" ]]; then
-          SCHEME=$(xcodebuild -list -project "$PROJECT" 2>/dev/null | grep -A 10 "Schemes:" | tail -n +2 | xargs | awk '{print $1}')
-        fi
+    - name: Install dependencies
+      run: flutter pub get
 
-        echo "Projet trouvé : $PROJECT"
-        echo "Scheme trouvé : $SCHEME"
-
-        if [[ "$PROJECT" == *.xcworkspace ]]; then
-          xcodebuild -workspace "$PROJECT" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
-        else
-          xcodebuild -project "$PROJECT" -scheme "$SCHEME" -sdk iphoneos -configuration Release CODE_SIGNING_ALLOWED=NO BUILD_DIR=build
-        fi
+    - name: Build iOS App
+      run: flutter build ios --release --no-codesign
 
     - name: Package IPA
       run: |
         mkdir -p Payload
-        APP_PATH=$(find build/Release-iphoneos -name "*.app" | head -n 1)
-        cp -r "$APP_PATH" Payload/
+        cp -r build/ios/iphoneos/Runner.app Payload/
         zip -r Unscroll.ipa Payload
 
     - name: Upload IPA
